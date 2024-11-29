@@ -1,3 +1,8 @@
 /target
 Cargo.lock
 /tools
+*.exe
+*.txt
+*.csv
+*.xlsx
+sample.py
