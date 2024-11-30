@@ -5981,5 +5981,100 @@ use procon_reader::*;
 //////////////////////////////////////////////////////////////////////////////////////
 
 fn main() {
-    read::<usize>();
+    solver::Solver::new().solve();
+}
+
+mod solver {
+    use super::*;
+    #[derive(Clone, Debug, Copy)]
+    struct Block {
+        w: usize,
+        h: usize,
+    }
+    impl Block {
+        fn new() -> Self {
+            Self {
+                w: read::<usize>(),
+                h: read::<usize>(),
+            }
+        }
+        fn rot(&self, ri: usize) -> Self {
+            if ri == 0 {
+                *self
+            } else {
+                Self {
+                    w: self.h,
+                    h: self.w,
+                }
+            }
+        }
+    }
+    pub struct Solver {
+        t0: Instant,
+        t: usize,
+        sig: f32,
+        blks: Vec<Block>,
+    }
+    impl Solver {
+        pub fn new() -> Self {
+            let t0 = Instant::now();
+            let n = read::<usize>();
+            let t = read::<usize>();
+            let sig = read::<f32>();
+            let blks = (0..n).map(|_| Block::new()).collect_vec();
+            Self { t0, t, sig, blks }
+        }
+        fn build(&self, wmax: usize) -> Option<(usize, Vec<(usize, i32)>)> {
+            // x-end, (idx, y_end)
+            let mut lower = BTreeMap::new();
+            lower.insert(0, (-1, 0));
+            let mut rec = vec![];
+            for (bi, &blk0) in self.blks.iter().enumerate() {
+                const INF: usize = std::usize::MAX;
+                let mut ymax_eval = INF;
+                let mut tgt = (0, (0, (0, 0)));
+                for ri in 0..2 {
+                    let blk1 = blk0.rot(ri);
+                    let mut ymax = 0;
+                    for (&x0, &(idx, _)) in &lower {
+                        let to = x0 + blk1.w;
+                        if wmax < to {
+                            break;
+                        }
+                        let mut itr = lower.range(x0 + 1..);
+                        while let Some((&x1, &(_, y))) = itr.next() {
+                            ymax.chmax(y + blk1.h);
+                            if to <= x1 {
+                                break;
+                            }
+                        }
+                        if ymax_eval.chmin(ymax) {
+                            tgt = (ri, (idx, (x0, to)));
+                        }
+                    }
+                }
+                if ymax_eval == INF {
+                    return None;
+                }
+                let (ri, (idx, (x0, x1))) = tgt;
+                rec.push((ri, idx));
+                while let Some((&x, _)) = lower.range(x0 + 1..).next() {
+                    if x <= x1 {
+                        lower.remove(&x);
+                    } else {
+                        break;
+                    }
+                }
+                lower.insert(x1, (bi as i32, ymax_eval));
+            }
+            let mut h = 0;
+            let mut w = 0;
+            for (x, (_, y)) in lower {
+                h.chmax(y);
+                w.chmax(x);
+            }
+            Some((h * w, rec))
+        }
+        pub fn solve(&self) {}
+    }
 }
