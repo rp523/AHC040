@@ -1,4 +1,5 @@
-import time
+from pathlib import Path
+import time, os
 from subprocess import getoutput
 def main():
     sum_score = 0
@@ -9,9 +10,14 @@ def main():
     max_score_i = -1
     max_time = -1
     max_time_i = -1
-    for i in range(10000):
+    exe_path = Path("exec.exe")
+    if exe_path.exists():
+        os.remove(exe_path)
+    getoutput("cargo fmt && cargo build -r && copy target\\release\\atcoder.exe {}".format(exe_path))
+    for i in range(50):
         cmd = "tester.exe"
-        cmd += " python sample.py"
+        #cmd += " python sample.py"
+        cmd += " {}".format(exe_path)
         cmd += r" < tools\in\{0:04d}.txt".format(i)
         cmd += r" > tools\out\{0:04d}.txt".format(i)
         t0 = time.time()
@@ -29,7 +35,7 @@ def main():
             max_time_i = i
         sum_score += score
         norm += 1
-        print(i, score, "AVE", int(sum_score / norm), "WORST", max_score_i, max_score, "BEST", min_score_i, min_score, "SLOW", max_time_i, max_time)
+        print(i, score, dt, "AVE", int(sum_score / norm), "WORST", max_score_i, max_score, "BEST", min_score_i, min_score, "SLOW", max_time_i, max_time)
 
 if __name__ == "__main__":
     main()

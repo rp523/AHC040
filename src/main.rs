@@ -5998,8 +5998,8 @@ mod solver {
                 h: read::<usize>(),
             }
         }
-        fn rot(&self, ri: usize) -> Self {
-            if ri == 0 {
+        fn rot(&self, ri: bool) -> Self {
+            if !ri {
                 *self
             } else {
                 Self {
@@ -6024,7 +6024,7 @@ mod solver {
             let blks = (0..n).map(|_| Block::new()).collect_vec();
             Self { t0, t, sig, blks }
         }
-        fn build(&self, wmax: usize) -> Option<(usize, Vec<(usize, i32)>)> {
+        fn build(&self, wmax: usize) -> Option<((usize, usize), Vec<(bool, i32)>)> {
             // x-end, (idx, y_end)
             let mut lower = BTreeMap::new();
             lower.insert(0, (-1, 0));
@@ -6032,11 +6032,11 @@ mod solver {
             for (bi, &blk0) in self.blks.iter().enumerate() {
                 const INF: usize = std::usize::MAX;
                 let mut ymax_eval = INF;
-                let mut tgt = (0, (0, (0, 0)));
-                for ri in 0..2 {
+                let mut tgt = (false, (0, (0, 0)));
+                for ri in [false, true] {
                     let blk1 = blk0.rot(ri);
-                    let mut ymax = 0;
                     for (&x0, &(idx, _)) in &lower {
+                        let mut ymax = blk1.h;
                         let to = x0 + blk1.w;
                         if wmax < to {
                             break;
@@ -6073,8 +6073,50 @@ mod solver {
                 h.chmax(y);
                 w.chmax(x);
             }
-            Some((h * w, rec))
+            Some(((h, w), rec))
         }
-        pub fn solve(&self) {}
+        fn build_best(&self) -> Vec<(bool, i32)> {
+            let mut wmax = 0;
+            let mut wmin = 0;
+            for &blk in self.blks.iter() {
+                let (w0, w1) = if blk.w < blk.h {
+                    (blk.w, blk.h)
+                } else {
+                    (blk.h, blk.w)
+                };
+                wmin.chmax(w0);
+                wmax += w1;
+            }
+            let mut w = wmax;
+            let mut best = None;
+            let mut best_rec = vec![];
+            while w >= wmin {
+                let Some(((hnow, wnow), rec)) = self.build(w) else {
+                    break;
+                };
+                w = wnow - 1;
+                if best.chmin(hnow * wnow) {
+                    best_rec = rec;
+                }
+            }
+            best_rec
+        }
+        fn answer(ans: &[(bool, i32)]) {
+            println!("{}", ans.len());
+            for (i, &(ri, low_idx)) in ans.iter().enumerate() {
+                let ri = if ri { 1 } else { 0 };
+                println!("{i} {ri} U {low_idx}");
+            }
+        }
+        pub fn solve(&self) {
+            let ans = self.build_best();
+            Self::answer(&ans);
+            for _ in 1..self.t {
+                println!("1");
+                println!("0 0 U -1");
+                let _ = read::<usize>();
+                let _ = read::<usize>();
+            }
+        }
     }
 }
