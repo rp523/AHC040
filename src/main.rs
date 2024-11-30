@@ -6012,7 +6012,7 @@ mod solver {
     pub struct Solver {
         t0: Instant,
         t: usize,
-        sig: f32,
+        sig: usize,
         blks: Vec<Block>,
     }
     impl Solver {
@@ -6020,7 +6020,7 @@ mod solver {
             let t0 = Instant::now();
             let n = read::<usize>();
             let t = read::<usize>();
-            let sig = read::<f32>();
+            let sig = read::<usize>();
             let blks = (0..n).map(|_| Block::new()).collect_vec();
             Self { t0, t, sig, blks }
         }
@@ -6044,7 +6044,7 @@ mod solver {
                         let mut itr = lower.range(x0 + 1..);
                         while let Some((&x1, &(_, y))) = itr.next() {
                             ymax.chmax(y + blk1.h);
-                            if to <= x1 {
+                            if to + self.sig / 4 <= x1 {
                                 break;
                             }
                         }
