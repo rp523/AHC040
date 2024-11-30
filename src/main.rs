@@ -6044,7 +6044,7 @@ mod solver {
                         let mut itr = lower.range(x0 + 1..);
                         while let Some((&x1, &(_, y))) = itr.next() {
                             ymax.chmax(y + blk1.h);
-                            if to + self.sig / 4 <= x1 {
+                            if to + self.sig <= x1 {
                                 break;
                             }
                         }
@@ -6095,7 +6095,7 @@ mod solver {
                     break;
                 };
                 w = wnow - 1;
-                if best.chmin(hnow * wnow) {
+                if best.chmin(hnow + wnow) {
                     best_rec = rec;
                 }
             }
