@@ -6075,7 +6075,7 @@ mod solver {
             }
             Some(((h, w), rec))
         }
-        fn build_best(&self) -> Vec<(bool, i32)> {
+        fn build_best(&self) -> BinaryHeap<(usize, Vec<(bool, i32)>)> {
             let mut wmax = 0;
             let mut wmin = 0;
             for &blk in self.blks.iter() {
@@ -6088,18 +6088,19 @@ mod solver {
                 wmax += w1;
             }
             let mut w = wmax;
-            let mut best = None;
-            let mut best_rec = vec![];
+            let mut que = BinaryHeap::new();
             while w >= wmin {
                 let Some(((hnow, wnow), rec)) = self.build(w) else {
                     break;
                 };
                 w = wnow - 1;
-                if best.chmin(hnow + wnow) {
-                    best_rec = rec;
+                let score = hnow + wnow;
+                que.push((score, rec));
+                while que.len() > self.t {
+                    que.pop();
                 }
             }
-            best_rec
+            que
         }
         fn answer(ans: &[(bool, i32)]) {
             println!("{}", ans.len());
@@ -6110,10 +6111,8 @@ mod solver {
         }
         pub fn solve(&self) {
             let ans = self.build_best();
-            Self::answer(&ans);
-            for _ in 1..self.t {
-                println!("1");
-                println!("0 0 U -1");
+            for (_, ans) in ans {
+                Self::answer(&ans);
                 let _ = read::<usize>();
                 let _ = read::<usize>();
             }
