@@ -6111,8 +6111,13 @@ mod solver {
         }
         pub fn solve(&self) {
             let ans = self.build_best();
-            for (_, ans) in ans {
+            for (_, ans) in ans.into_iter().rev().take(1) {
                 Self::answer(&ans);
+                let _ = read::<usize>();
+                let _ = read::<usize>();
+            }
+            for _ in 1..self.t {
+                println!("0");
                 let _ = read::<usize>();
                 let _ = read::<usize>();
             }
