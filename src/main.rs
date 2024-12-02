@@ -6026,8 +6026,13 @@ mod solver {
         }
         fn build(&self, wmax: usize) -> Option<((usize, usize), Vec<(bool, i32)>)> {
             // x-end, (idx, y_end)
+            #[derive(Clone, Copy, Debug)]
+            struct Lower {
+                idx: i32,
+                y1: usize,
+            }
             let mut lower = BTreeMap::new();
-            lower.insert(0, (-1, 0));
+            lower.insert(0, Lower { idx: -1, y1: 0 });
             let mut rec = vec![];
             for (bi, &blk0) in self.blks.iter().enumerate() {
                 const INF: usize = std::usize::MAX;
@@ -6035,21 +6040,21 @@ mod solver {
                 let mut tgt = (false, (0, (0, 0)));
                 for ri in [false, true] {
                     let blk1 = blk0.rot(ri);
-                    for (&x0, &(idx, _)) in &lower {
+                    for (&x0, lower0) in &lower {
                         let mut ymax = blk1.h;
                         let to = x0 + blk1.w;
                         if wmax < to {
                             break;
                         }
                         let mut itr = lower.range(x0 + 1..);
-                        while let Some((&x1, &(_, y))) = itr.next() {
-                            ymax.chmax(y + blk1.h);
+                        while let Some((&x1, lower1)) = itr.next() {
+                            ymax.chmax(lower1.y1 + blk1.h);
                             if to + self.sig <= x1 {
                                 break;
                             }
                         }
                         if ymax_eval.chmin(ymax) {
-                            tgt = (ri, (idx, (x0, to)));
+                            tgt = (ri, (lower0.idx, (x0, to)));
                         }
                     }
                 }
@@ -6065,12 +6070,18 @@ mod solver {
                         break;
                     }
                 }
-                lower.insert(x1, (bi as i32, ymax_eval));
+                lower.insert(
+                    x1,
+                    Lower {
+                        idx: bi as i32,
+                        y1: ymax_eval,
+                    },
+                );
             }
             let mut h = 0;
             let mut w = 0;
-            for (x, (_, y)) in lower {
-                h.chmax(y);
+            for (x, lower) in lower {
+                h.chmax(lower.y1);
                 w.chmax(x);
             }
             Some(((h, w), rec))
