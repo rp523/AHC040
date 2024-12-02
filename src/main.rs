@@ -5988,14 +5988,14 @@ mod solver {
     use super::*;
     #[derive(Clone, Debug, Copy)]
     struct Block {
-        w: usize,
-        h: usize,
+        w: i64,
+        h: i64,
     }
     impl Block {
         fn new() -> Self {
             Self {
-                w: read::<usize>(),
-                h: read::<usize>(),
+                w: read::<i64>(),
+                h: read::<i64>(),
             }
         }
         fn rot(&self, ri: bool) -> Self {
@@ -6012,57 +6012,78 @@ mod solver {
     pub struct Solver {
         t0: Instant,
         t: usize,
-        sig: usize,
+        sig: i64,
         blks: Vec<Block>,
+        sig_sqrts: Vec<i64>,
     }
     impl Solver {
         pub fn new() -> Self {
             let t0 = Instant::now();
             let n = read::<usize>();
             let t = read::<usize>();
-            let sig = read::<usize>();
+            let sig = read::<f64>();
             let blks = (0..n).map(|_| Block::new()).collect_vec();
-            Self { t0, t, sig, blks }
+            let sig_sqrts = (0..=n)
+                .map(|i| ((i as f64).sqrt() * sig) as i64)
+                .collect_vec();
+            Self {
+                t0,
+                t,
+                sig: sig as i64,
+                blks,
+                sig_sqrts,
+            }
         }
-        fn build(&self, wmax: usize) -> Option<((usize, usize), Vec<(bool, i32)>)> {
+        fn build(&self, wmax: i64) -> Option<((i64, i64), Vec<(bool, i32)>)> {
             // x-end, (idx, y_end)
             #[derive(Clone, Copy, Debug)]
             struct Lower {
                 idx: i32,
-                y1: usize,
+                y1: i64,
+                dist: usize,
+            }
+            impl Lower {
+                fn empty() -> Self {
+                    Self {
+                        idx: -1,
+                        y1: 0,
+                        dist: 0,
+                    }
+                }
             }
             let mut lower = BTreeMap::new();
-            lower.insert(0, Lower { idx: -1, y1: 0 });
+            lower.insert(0i64, Lower::empty());
             let mut rec = vec![];
             for (bi, &blk0) in self.blks.iter().enumerate() {
-                const INF: usize = std::usize::MAX;
+                const INF: i64 = std::i64::MAX;
                 let mut ymax_eval = INF;
-                let mut tgt = (false, (0, (0, 0)));
+                let mut tgt = (false, (Lower::empty(), (0, 0)));
                 for ri in [false, true] {
                     let blk1 = blk0.rot(ri);
-                    for (&x0, lower0) in &lower {
+                    for (&x0, &lower0) in &lower {
                         let mut ymax = blk1.h;
                         let to = x0 + blk1.w;
                         if wmax < to {
                             break;
                         }
-                        let mut itr = lower.range(x0 + 1..);
-                        while let Some((&x1, lower1)) = itr.next() {
+                        let mut x = x0;
+                        while let Some((&x1, lower1)) = lower.range(x + 1..).next() {
                             ymax.chmax(lower1.y1 + blk1.h);
                             if to + self.sig <= x1 {
                                 break;
                             }
+                            x = x1;
                         }
                         if ymax_eval.chmin(ymax) {
-                            tgt = (ri, (lower0.idx, (x0, to)));
+                            tgt = (ri, (lower0, (x0, to)));
                         }
                     }
                 }
                 if ymax_eval == INF {
                     return None;
                 }
-                let (ri, (idx, (x0, x1))) = tgt;
-                rec.push((ri, idx));
+                let (ri, (lower0, (x0, x1))) = tgt;
+                rec.push((ri, lower0.idx));
                 while let Some((&x, _)) = lower.range(x0 + 1..).next() {
                     if x <= x1 {
                         lower.remove(&x);
@@ -6075,6 +6096,7 @@ mod solver {
                     Lower {
                         idx: bi as i32,
                         y1: ymax_eval,
+                        dist: lower0.dist + 1,
                     },
                 );
             }
@@ -6086,7 +6108,7 @@ mod solver {
             }
             Some(((h, w), rec))
         }
-        fn build_best(&self) -> BinaryHeap<(usize, Vec<(bool, i32)>)> {
+        fn build_best(&self) -> BinaryHeap<(i64, Vec<(bool, i32)>)> {
             let mut wmax = 0;
             let mut wmin = 0;
             for &blk in self.blks.iter() {
