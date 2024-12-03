@@ -6154,7 +6154,8 @@ mod solver {
                 wmin.chmax(w0);
                 wmax += w1;
             }
-            let mut w = wmax;
+            let sum_area = self.blks.iter().map(|blk| blk.h * blk.w).sum::<i64>();
+            let mut w = (sum_area as f64).sqrt() as i64 * 2;
             let mut que = BinaryHeap::new();
             while w >= wmin {
                 let Some(((hnow, wnow), rec)) = self.build(w) else {
@@ -6165,6 +6166,9 @@ mod solver {
                 que.push((score, rec));
                 while que.len() > self.t {
                     que.pop();
+                }
+                if w < (sum_area as f64).sqrt() as i64 / 2 {
+                    break;
                 }
             }
             que
