@@ -6057,24 +6057,58 @@ mod solver {
             for (bi, &blk0) in self.blks.iter().enumerate() {
                 const INF: i64 = std::i64::MAX;
                 let mut ymax_eval = INF;
+                let mut ymax_eval_exp = None;
                 let mut tgt = (false, (Lower::empty(), (0, 0)));
                 for ri in [false, true] {
                     let blk1 = blk0.rot(ri);
                     for (&x0, &lower0) in &lower {
-                        let mut ymax = blk1.h;
                         let to = x0 + blk1.w;
+                        let sig1 = (self.sig_sqrts[lower0.dist + 1] * 2) as f64;
                         if wmax < to {
                             break;
                         }
-                        let mut x = x0;
-                        while let Some((&x1, lower1)) = lower.range(x + 1..).next() {
-                            ymax.chmax(lower1.y1 + blk1.h);
-                            if to + self.sig <= x1 {
-                                break;
+                        let ymax = {
+                            let mut ymax = blk1.h;
+                            let mut x = x0;
+                            while let Some((&x1, lower1)) = lower.range(x + 1..).next() {
+                                ymax.chmax(lower1.y1 + blk1.h);
+                                if to + self.sig <= x1 {
+                                    break;
+                                }
+                                x = x1;
                             }
-                            x = x1;
-                        }
-                        if ymax_eval.chmin(ymax) {
+                            ymax
+                        };
+                        let ymax_exp = {
+                            let cdf = |x: i64| -> f64 {
+                                let norm_x = (x as f64 - to as f64) / sig1;
+                                let c = 0.5 + 0.5 * libm::erf(norm_x);
+                                debug_assert!(c >= 0.0);
+                                c
+                            };
+                            let mut x = x0;
+                            let mut cum_p = cdf(x);
+                            let mut exp = 0.0;
+                            let mut ymax_exp = blk1.h;
+                            while let Some((&x1, lower1)) = lower.range(x + 1..).next() {
+                                ymax_exp.chmax(lower1.y1 + blk1.h);
+                                if to + self.sig <= x1 {
+                                    break;
+                                }
+                                let cum_p_nxt = cdf(x1);
+                                let mut delta_p = cum_p_nxt - cum_p;
+                                delta_p.chmax(0.0);
+                                exp += delta_p * ymax_exp as f64;
+                                cum_p += delta_p;
+                                x = x1;
+                            }
+                            let mut rem_p = 1.0 - cum_p;
+                            rem_p.chmax(0.0);
+                            exp += rem_p * ymax as f64;
+                            exp
+                        };
+                        if ymax_eval_exp.chmin(ymax_exp) {
+                            ymax_eval = ymax;
                             tgt = (ri, (lower0, (x0, to)));
                         }
                     }
