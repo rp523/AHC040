@@ -6047,7 +6047,7 @@ mod solver {
         fn eval_multi(&self, ans: &[(bool, i32)], sig_rate: i64, rng: &mut ChaChaRng) -> i64 {
             let mut sum = 0;
             let mut sumsq = 0;
-            const NORM: i64 = 20;
+            const NORM: i64 = 10;
             for _ in 0..NORM {
                 let score = self.eval(ans, 1, rng);
                 sum += score;
@@ -6176,12 +6176,92 @@ mod solver {
                 };
                 w = wnow - 1;
                 let score = hnow + wnow;
+                que.push((score, wnow, rec));
+                while que.len() > 1 {
+                    que.pop();
+                }
+            }
+            let (_, wmax, _rec) = que.pop().unwrap();
+            let mut que = BinaryHeap::new();
+            while self.t0.elapsed().as_millis() < 2500 {
+                let Some(((_hnow, _wnow), rec)) = self.build_random(wmax, rng) else {
+                    break;
+                };
+                let score = self.eval_multi(&rec, 1, rng);
                 que.push((score, rec));
                 while que.len() > self.t {
                     que.pop();
                 }
             }
             que
+        }
+        fn build_random(
+            &self,
+            wmax: i64,
+            rng: &mut ChaChaRng,
+        ) -> Option<((i64, i64), Vec<(bool, i32)>)> {
+            // x-end, (idx, y_end)
+            let mut lower = BTreeMap::new();
+            lower.insert(0i64, Lower::empty());
+            let mut rec = vec![];
+            use rand::prelude::{thread_rng, Distribution};
+            let normal = rand_distr::Normal::<f64>::new(0.0, self.sig as f64).unwrap();
+            for (bi, &blk0_seed) in self.blks.iter().enumerate() {
+                let mut blk0 = blk0_seed;
+                blk0.h += normal.sample(rng) as i64;
+                blk0.w += normal.sample(rng) as i64;
+                const INF: i64 = std::i64::MAX;
+                let mut ymax_eval = INF;
+                let mut tgt = (false, (Lower::empty(), (0, 0)));
+                for ri in [false, true] {
+                    let blk1 = blk0.rot(ri);
+                    for (&x0, &lower0) in &lower {
+                        let mut ymax = blk1.h;
+                        let to = x0 + blk1.w;
+                        if wmax < to {
+                            break;
+                        }
+                        let mut x = x0;
+                        while let Some((&x1, lower1)) = lower.range(x + 1..).next() {
+                            ymax.chmax(lower1.y1 + blk1.h);
+                            if to + self.sig <= x1 {
+                                break;
+                            }
+                            x = x1;
+                        }
+                        if ymax_eval.chmin(ymax) {
+                            tgt = (ri, (lower0, (x0, to)));
+                        }
+                    }
+                }
+                if ymax_eval == INF {
+                    return None;
+                }
+                let (ri, (lower0, (x0, x1))) = tgt;
+                rec.push((ri, lower0.idx));
+                while let Some((&x, _)) = lower.range(x0 + 1..).next() {
+                    if x <= x1 {
+                        lower.remove(&x);
+                    } else {
+                        break;
+                    }
+                }
+                lower.insert(
+                    x1,
+                    Lower {
+                        idx: bi as i32,
+                        y1: ymax_eval,
+                    },
+                );
+            }
+            let mut h = 0;
+            let mut w = 0;
+            for (x, lower) in lower {
+                h.chmax(lower.y1);
+                w.chmax(x);
+            }
+            debug_assert_eq!(h + w, self.eval(&rec, 0, rng));
+            Some(((h, w), rec))
         }
         fn answer(ans: &[(bool, i32)]) {
             println!("{}", ans.len());
