@@ -6009,16 +6009,196 @@ mod solver {
             }
         }
     }
-    #[derive(Clone, Copy, Debug)]
-    struct Lower {
-        idx: i32,
-        y1: i32,
+    #[derive(Clone, Debug)]
+    struct Layer {
+        surface: BTreeMap<i32, i32>,
+        origins: Vec<i32>,
     }
-    impl Lower {
-        fn empty() -> Self {
-            Self { idx: -1, y1: 0 }
+    impl Layer {
+        fn new() -> Self {
+            let mut surface = BTreeMap::new();
+            surface.insert(0, 0);
+            Self {
+                surface,
+                origins: vec![],
+            }
         }
     }
+    #[derive(Clone, Debug)]
+    struct State {
+        low: Layer,
+        left: Layer,
+        h: i32,
+        w: i32,
+        ans: Vec<(bool, char, i32)>,
+    }
+    impl State {
+        fn new() -> Self {
+            Self {
+                low: Layer::new(),
+                left: Layer::new(),
+                h: 0,
+                w: 0,
+                ans: vec![],
+            }
+        }
+        fn add(&mut self, ri: bool, dir: char, idx_on: i32, blk: Block) {
+            match dir {
+                'U' => Self::add_impl(
+                    &mut self.low,
+                    &mut self.left,
+                    idx_on,
+                    blk.rot(ri),
+                    &mut self.h,
+                    &mut self.w,
+                ),
+                'L' => Self::add_impl(
+                    &mut self.left,
+                    &mut self.low,
+                    idx_on,
+                    blk.rot(!ri),
+                    &mut self.w,
+                    &mut self.h,
+                ),
+                _ => unreachable!(),
+            }
+            self.ans.push((ri, dir, idx_on));
+        }
+        fn add_impl(
+            low: &mut Layer,
+            left: &mut Layer,
+            idx_on: i32,
+            blk: Block,
+            h: &mut i32,
+            w: &mut i32,
+        ) {
+            let x0 = if idx_on < 0 {
+                0
+            } else {
+                low.origins[idx_on as usize]
+            };
+            let x1 = x0 + blk.w;
+            // next height
+            let y1 = {
+                let mut y1 = blk.h;
+                let margin = 0;
+                let mut x = x0;
+                while let Some((&low_x1, &low_y1)) = low.surface.range(x + 1 - margin..).next() {
+                    y1.chmax(low_y1 + blk.h);
+                    if x1 <= low_x1 + margin {
+                        // enough
+                        break;
+                    }
+                    x = low_x1;
+                }
+                y1
+            };
+            h.chmax(y1);
+            w.chmax(x1);
+            // update low
+            {
+                let mut x = x0;
+                while let Some((&low_x1, _)) = low.surface.range(x + 1..).next() {
+                    if x1 < low_x1 {
+                        break;
+                    } else {
+                        if let Some((&prev_x1, &prev_y1)) = low.surface.range(..low_x1).next_back()
+                        {
+                            if prev_x1 < x0 {
+                                low.surface.insert(x0, prev_y1);
+                            }
+                        }
+                        low.surface.remove(&low_x1);
+                    }
+                    x = low_x1;
+                }
+                low.surface.insert(x1, y1);
+                low.origins.push(x1);
+            }
+            // update left
+            {
+                let y0 = y1 - blk.h;
+                let mut y = y0;
+                while let Some((&left_y1, &left_x1)) = left.surface.range(y + 1..).next() {
+                    if y1 < left_y1 {
+                        break;
+                    } else if x1 < left_x1 { // now, equality is not met
+                         // do nothihg
+                    } else {
+                        debug_assert!(left_y1 <= y1); //mark
+                        debug_assert!(left_x1 < x1);
+                        if let Some((&prev_y1, &prev_x1)) =
+                            left.surface.range(..left_y1).next_back()
+                        {
+                            if prev_y1 < y0 {
+                                left.surface.insert(y0, prev_x1);
+                            }
+                        }
+                        left.surface.remove(&left_y1);
+                    }
+                    y = left_y1;
+                }
+                if let Some((_, &left_x1)) = left.surface.range(y1..).next() {
+                    if left_x1 < x1 {
+                        left.surface.insert(y1, x1);
+                    }
+                } else {
+                    left.surface.insert(y1, x1);
+                }
+                left.origins.push(y1);
+            }
+        }
+        fn eval(&self, ri: bool, dir: char, idx_on: i32, blk: Block) -> i32 {
+            match dir {
+                'U' => Self::eval_impl(&self.low, idx_on, blk.rot(ri), self.h, self.w),
+                'L' => Self::eval_impl(&self.left, idx_on, blk.rot(!ri), self.w, self.h),
+                _ => unreachable!(),
+            }
+        }
+        fn eval_impl(low: &Layer, idx_on: i32, blk: Block, h: i32, w: i32) -> i32 {
+            let x0 = if idx_on < 0 {
+                0
+            } else {
+                low.origins[idx_on as usize]
+            };
+            let x1 = x0 + blk.w;
+            // next height
+            let y1 = {
+                let mut y1 = blk.h;
+                let margin = 0;
+                let mut x = x0;
+                while let Some((&low_x1, &low_y1)) = low.surface.range(x + 1 - margin..).next() {
+                    y1.chmax(low_y1 + blk.h);
+                    if x1 <= low_x1 + margin {
+                        // enough
+                        break;
+                    }
+                    x = low_x1;
+                }
+                y1
+            };
+            max(h, y1) + max(w, x1)
+        }
+        fn select_best(&self, blk: Block) -> (bool, char, i32) {
+            let mut ev = std::i32::MAX;
+            let mut ret = (false, 'U', -1);
+            for ri in [false, true] {
+                for dir in ['U', 'L'] {
+                    for idx_on in -1..self.low.origins.len() as i32 {
+                        if ev.chmin(self.eval(ri, dir, idx_on, blk)) {
+                            ret = (ri, dir, idx_on);
+                        }
+                    }
+                }
+            }
+            ret
+        }
+        fn evolve(&mut self, blk: Block) {
+            let (ri, dir, idx_on) = self.select_best(blk);
+            self.add(ri, dir, idx_on, blk);
+        }
+    }
+
     pub struct Solver {
         t0: Instant,
         t: usize,
@@ -6044,159 +6224,24 @@ mod solver {
                 sig_sqrts,
             }
         }
-        fn eval_multi(&self, ans: &[(bool, i32)], sig_rate: i32, rng: &mut ChaChaRng) -> i32 {
-            let mut sum = 0;
-            let mut sumsq = 0;
-            const NORM: i32 = 20;
-            for _ in 0..NORM {
-                let score = self.eval(ans, 1, rng);
-                sum += score;
-                sumsq += score * score;
-            }
-            let ave = sum / NORM;
-            let var = max(0, sumsq / NORM - ave * ave);
-            ave + (var as f64).sqrt() as i32
-        }
-        fn eval(&self, ans: &[(bool, i32)], sig_rate: i32, rng: &mut ChaChaRng) -> i32 {
-            let mut lower = BTreeMap::new();
-            lower.insert(0i32, 0);
-            let mut xends = vec![];
-            use rand::prelude::{thread_rng, Distribution};
-            let normal = rand_distr::Normal::<f64>::new(0.0, self.sig as f64).unwrap();
-            for (&blk0, &(ri, idx)) in self.blks.iter().zip(ans.iter()) {
-                let mut blk0 = blk0;
-                blk0.w = max(1, blk0.w + sig_rate * normal.sample(rng) as i32);
-                blk0.h = max(1, blk0.h + sig_rate * normal.sample(rng) as i32);
-                let blk1 = blk0.rot(ri);
-                let x0 = if idx < 0 { 0 } else { xends[idx as usize] };
-                let mut ymax = blk1.h;
-                let to = x0 + blk1.w;
-                let mut x = x0;
-                while let Some((&x1, &lo_y1)) = lower.range(x + 1..).next() {
-                    ymax.chmax(lo_y1 + blk1.h);
-                    if to <= x1 {
-                        break;
-                    }
-                    x = x1;
-                }
-                while let Some((&x, _)) = lower.range(x0 + 1..).next() {
-                    if x <= to {
-                        lower.remove(&x);
-                    } else {
-                        break;
-                    }
-                }
-                lower.insert(to, ymax);
-                xends.push(to);
-            }
-            let mut h = 0;
-            let mut w = 0;
-            for (x, lo_y1) in lower {
-                h.chmax(lo_y1);
-                w.chmax(x);
-            }
-            h + w
-        }
-        fn build(&self, wmax: i32, rng: &mut ChaChaRng) -> Option<((i32, i32), Vec<(bool, i32)>)> {
-            // x-end, (idx, y_end)
-            let mut lower = BTreeMap::new();
-            lower.insert(0i32, Lower::empty());
-            let mut rec = vec![];
-            for (bi, &blk0) in self.blks.iter().enumerate() {
-                const INF: i32 = std::i32::MAX;
-                let mut ymax_eval = INF;
-                let mut tgt = (false, (Lower::empty(), (0, 0)));
-                for ri in [false, true] {
-                    let blk1 = blk0.rot(ri);
-                    for (&x0, &lower0) in &lower {
-                        let mut ymax = blk1.h;
-                        let to = x0 + blk1.w;
-                        if wmax < to {
-                            break;
-                        }
-                        let mut x = x0;
-                        while let Some((&x1, lower1)) = lower.range(x + 1..).next() {
-                            ymax.chmax(lower1.y1 + blk1.h);
-                            if to + self.sig <= x1 {
-                                break;
-                            }
-                            x = x1;
-                        }
-                        if ymax_eval.chmin(ymax) {
-                            tgt = (ri, (lower0, (x0, to)));
-                        }
-                    }
-                }
-                if ymax_eval == INF {
-                    return None;
-                }
-                let (ri, (lower0, (x0, x1))) = tgt;
-                rec.push((ri, lower0.idx));
-                while let Some((&x, _)) = lower.range(x0 + 1..).next() {
-                    if x <= x1 {
-                        lower.remove(&x);
-                    } else {
-                        break;
-                    }
-                }
-                lower.insert(
-                    x1,
-                    Lower {
-                        idx: bi as i32,
-                        y1: ymax_eval,
-                    },
-                );
-            }
-            let mut h = 0;
-            let mut w = 0;
-            for (x, lower) in lower {
-                h.chmax(lower.y1);
-                w.chmax(x);
-            }
-            debug_assert_eq!(h + w, self.eval(&rec, 0, rng));
-            Some(((h, w), rec))
-        }
-        fn build_best(&self, rng: &mut ChaChaRng) -> BinaryHeap<(i32, Vec<(bool, i32)>)> {
-            let mut wmax = 0;
-            let mut wmin = 0;
-            for &blk in self.blks.iter() {
-                let (w0, w1) = if blk.w < blk.h {
-                    (blk.w, blk.h)
-                } else {
-                    (blk.h, blk.w)
-                };
-                wmin.chmax(w0);
-                wmax += w1;
-            }
-            let mut w = wmax;
-            let mut que = BinaryHeap::new();
-            while w >= wmin {
-                let Some(((hnow, wnow), rec)) = self.build(w, rng) else {
-                    break;
-                };
-                w = wnow - 1;
-                let score = hnow + wnow;
-                que.push((score, rec));
-                while que.len() > self.t {
-                    que.pop();
-                }
-            }
-            que
-        }
-        fn answer(ans: &[(bool, i32)]) {
+        fn answer(ans: &[(bool, char, i32)]) {
             println!("{}", ans.len());
-            for (i, &(ri, low_idx)) in ans.iter().enumerate() {
+            for (i, &(ri, dir, idx_on)) in ans.iter().enumerate() {
                 let ri = if ri { 1 } else { 0 };
-                println!("{i} {ri} U {low_idx}");
+                println!("{i} {ri} {dir} {idx_on}");
             }
         }
         pub fn solve(&self) {
-            let mut rng = ChaChaRng::from_seed([0; 32]);
-            let ans = self.build_best(&mut rng);
-            for (_, ans) in ans.into_iter().rev() {
-                Self::answer(&ans);
-                let _ = read::<usize>();
-                let _ = read::<usize>();
+            //let mut rng = ChaChaRng::from_seed([0; 32]);
+            let mut state = State::new();
+            for &blk in self.blks.iter() {
+                state.evolve(blk);
+            }
+            Self::answer(&state.ans);
+            for _ in 1..self.t {
+                println!("0");
+                let _ = read::<i32>();
+                let _ = read::<i32>();
             }
         }
     }
