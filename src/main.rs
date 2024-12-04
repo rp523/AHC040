@@ -6148,14 +6148,14 @@ mod solver {
                 left.origins.push(y1);
             }
         }
-        fn eval(&self, ri: bool, dir: char, idx_on: i32, blk: Block) -> i32 {
+        fn eval(&self, sig: i32, ri: bool, dir: char, idx_on: i32, blk: Block) -> i32 {
             match dir {
-                'U' => Self::eval_impl(&self.low, idx_on, blk.rot(ri), self.h, self.w),
-                'L' => Self::eval_impl(&self.left, idx_on, blk.rot(!ri), self.w, self.h),
+                'U' => Self::eval_impl(sig, &self.low, idx_on, blk.rot(ri), self.h, self.w),
+                'L' => Self::eval_impl(sig, &self.left, idx_on, blk.rot(!ri), self.w, self.h),
                 _ => unreachable!(),
             }
         }
-        fn eval_impl(low: &Layer, idx_on: i32, blk: Block, h: i32, w: i32) -> i32 {
+        fn eval_impl(sig: i32, low: &Layer, idx_on: i32, blk: Block, h: i32, w: i32) -> i32 {
             let x0 = if idx_on < 0 {
                 0
             } else {
@@ -6167,7 +6167,7 @@ mod solver {
                 let mut y1 = blk.h;
                 let margin = 0;
                 let mut x = x0;
-                while let Some((&low_x1, &low_y1)) = low.surface.range(x + 1 - margin..).next() {
+                while let Some((&low_x1, &low_y1)) = low.surface.range(x + 1..).next() {
                     y1.chmax(low_y1 + blk.h);
                     if x1 <= low_x1 + margin {
                         // enough
@@ -6179,13 +6179,13 @@ mod solver {
             };
             max(h, y1) + max(w, x1)
         }
-        fn select_best(&self, blk: Block) -> (bool, char, i32) {
+        fn select_best(&self, sig: i32, blk: Block) -> (bool, char, i32) {
             let mut ev = std::i32::MAX;
             let mut ret = (false, 'U', -1);
             for ri in [false, true] {
                 for dir in ['U', 'L'] {
                     for idx_on in -1..self.low.origins.len() as i32 {
-                        if ev.chmin(self.eval(ri, dir, idx_on, blk)) {
+                        if ev.chmin(self.eval(sig, ri, dir, idx_on, blk)) {
                             ret = (ri, dir, idx_on);
                         }
                     }
@@ -6193,8 +6193,14 @@ mod solver {
             }
             ret
         }
-        fn evolve(&mut self, blk: Block) {
-            let (ri, dir, idx_on) = self.select_best(blk);
+        fn evolve(&mut self, sig: i32, mut blk: Block, rng: &mut ChaChaRng) {
+            use rand::prelude::{thread_rng, Distribution};
+            let normal = rand_distr::Normal::<f32>::new(0.0, sig as f32).unwrap();
+            blk.h += normal.sample(rng) as i32;
+            blk.w += normal.sample(rng) as i32;
+            blk.h.chmax(1);
+            blk.w.chmax(1);
+            let (ri, dir, idx_on) = self.select_best(sig, blk);
             self.add(ri, dir, idx_on, blk);
         }
     }
@@ -6232,14 +6238,13 @@ mod solver {
             }
         }
         pub fn solve(&self) {
-            //let mut rng = ChaChaRng::from_seed([0; 32]);
-            let mut state = State::new();
-            for &blk in self.blks.iter() {
-                state.evolve(blk);
-            }
-            Self::answer(&state.ans);
-            for _ in 1..self.t {
-                println!("0");
+            let mut rng = ChaChaRng::from_seed([0; 32]);
+            for _ in 0..self.t {
+                let mut state = State::new();
+                for &blk in self.blks.iter() {
+                    state.evolve(self.sig, blk, &mut rng);
+                }
+                Self::answer(&state.ans);
                 let _ = read::<i32>();
                 let _ = read::<i32>();
             }
