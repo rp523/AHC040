@@ -6009,6 +6009,16 @@ mod solver {
             }
         }
     }
+    #[derive(Clone, Copy, Debug)]
+    struct Lower {
+        idx: i32,
+        y1: i64,
+    }
+    impl Lower {
+        fn empty() -> Self {
+            Self { idx: -1, y1: 0 }
+        }
+    }
     pub struct Solver {
         t0: Instant,
         t: usize,
@@ -6034,23 +6044,61 @@ mod solver {
                 sig_sqrts,
             }
         }
-        fn build(&self, wmax: i64) -> Option<((i64, i64), Vec<(bool, i32)>)> {
-            // x-end, (idx, y_end)
-            #[derive(Clone, Copy, Debug)]
-            struct Lower {
-                idx: i32,
-                y1: i64,
-                dist: usize,
+        fn eval_multi(&self, ans: &[(bool, i32)], sig_rate: i64, rng: &mut ChaChaRng) -> i64 {
+            let mut sum = 0;
+            let mut sumsq = 0;
+            const NORM: i64 = 20;
+            for _ in 0..NORM {
+                let score = self.eval(ans, 1, rng);
+                sum += score;
+                sumsq += score * score;
             }
-            impl Lower {
-                fn empty() -> Self {
-                    Self {
-                        idx: -1,
-                        y1: 0,
-                        dist: 0,
+            let ave = sum / NORM;
+            let var = max(0, sumsq / NORM - ave * ave);
+            ave + (var as f64).sqrt() as i64
+        }
+        fn eval(&self, ans: &[(bool, i32)], sig_rate: i64, rng: &mut ChaChaRng) -> i64 {
+            let mut lower = BTreeMap::new();
+            lower.insert(0i64, 0);
+            let mut xends = vec![];
+            use rand::prelude::{thread_rng, Distribution};
+            let normal = rand_distr::Normal::<f64>::new(0.0, self.sig as f64).unwrap();
+            for (&blk0, &(ri, idx)) in self.blks.iter().zip(ans.iter()) {
+                let mut blk0 = blk0;
+                blk0.w = max(1, blk0.w + sig_rate * normal.sample(rng) as i64);
+                blk0.h = max(1, blk0.h + sig_rate * normal.sample(rng) as i64);
+                let blk1 = blk0.rot(ri);
+                let x0 = if idx < 0 { 0 } else { xends[idx as usize] };
+                let mut ymax = blk1.h;
+                let to = x0 + blk1.w;
+                let mut x = x0;
+                while let Some((&x1, &lo_y1)) = lower.range(x + 1..).next() {
+                    ymax.chmax(lo_y1 + blk1.h);
+                    if to <= x1 {
+                        break;
+                    }
+                    x = x1;
+                }
+                while let Some((&x, _)) = lower.range(x0 + 1..).next() {
+                    if x <= to {
+                        lower.remove(&x);
+                    } else {
+                        break;
                     }
                 }
+                lower.insert(to, ymax);
+                xends.push(to);
             }
+            let mut h = 0;
+            let mut w = 0;
+            for (x, lo_y1) in lower {
+                h.chmax(lo_y1);
+                w.chmax(x);
+            }
+            h + w
+        }
+        fn build(&self, wmax: i64, rng: &mut ChaChaRng) -> Option<((i64, i64), Vec<(bool, i32)>)> {
+            // x-end, (idx, y_end)
             let mut lower = BTreeMap::new();
             lower.insert(0i64, Lower::empty());
             let mut rec = vec![];
@@ -6096,7 +6144,6 @@ mod solver {
                     Lower {
                         idx: bi as i32,
                         y1: ymax_eval,
-                        dist: lower0.dist + 1,
                     },
                 );
             }
@@ -6106,9 +6153,10 @@ mod solver {
                 h.chmax(lower.y1);
                 w.chmax(x);
             }
+            debug_assert_eq!(h + w, self.eval(&rec, 0, rng));
             Some(((h, w), rec))
         }
-        fn build_best(&self) -> BinaryHeap<(i64, Vec<(bool, i32)>)> {
+        fn build_best(&self, rng: &mut ChaChaRng) -> BinaryHeap<(i64, Vec<(bool, i32)>)> {
             let mut wmax = 0;
             let mut wmin = 0;
             for &blk in self.blks.iter() {
@@ -6123,7 +6171,7 @@ mod solver {
             let mut w = wmax;
             let mut que = BinaryHeap::new();
             while w >= wmin {
-                let Some(((hnow, wnow), rec)) = self.build(w) else {
+                let Some(((hnow, wnow), rec)) = self.build(w, rng) else {
                     break;
                 };
                 w = wnow - 1;
@@ -6143,14 +6191,10 @@ mod solver {
             }
         }
         pub fn solve(&self) {
-            let ans = self.build_best();
-            for (_, ans) in ans.into_iter().rev().take(1) {
+            let mut rng = ChaChaRng::from_seed([0; 32]);
+            let ans = self.build_best(&mut rng);
+            for (_, ans) in ans.into_iter().rev() {
                 Self::answer(&ans);
-                let _ = read::<usize>();
-                let _ = read::<usize>();
-            }
-            for _ in 1..self.t {
-                println!("0");
                 let _ = read::<usize>();
                 let _ = read::<usize>();
             }
