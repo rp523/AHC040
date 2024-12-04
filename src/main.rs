@@ -5988,14 +5988,14 @@ mod solver {
     use super::*;
     #[derive(Clone, Debug, Copy)]
     struct Block {
-        w: i64,
-        h: i64,
+        w: i32,
+        h: i32,
     }
     impl Block {
         fn new() -> Self {
             Self {
-                w: read::<i64>(),
-                h: read::<i64>(),
+                w: read::<i32>(),
+                h: read::<i32>(),
             }
         }
         fn rot(&self, ri: bool) -> Self {
@@ -6012,7 +6012,7 @@ mod solver {
     #[derive(Clone, Copy, Debug)]
     struct Lower {
         idx: i32,
-        y1: i64,
+        y1: i32,
     }
     impl Lower {
         fn empty() -> Self {
@@ -6022,9 +6022,9 @@ mod solver {
     pub struct Solver {
         t0: Instant,
         t: usize,
-        sig: i64,
+        sig: i32,
         blks: Vec<Block>,
-        sig_sqrts: Vec<i64>,
+        sig_sqrts: Vec<i32>,
     }
     impl Solver {
         pub fn new() -> Self {
@@ -6034,20 +6034,20 @@ mod solver {
             let sig = read::<f64>();
             let blks = (0..n).map(|_| Block::new()).collect_vec();
             let sig_sqrts = (0..=n)
-                .map(|i| ((i as f64).sqrt() * sig) as i64)
+                .map(|i| ((i as f64).sqrt() * sig) as i32)
                 .collect_vec();
             Self {
                 t0,
                 t,
-                sig: sig as i64,
+                sig: sig as i32,
                 blks,
                 sig_sqrts,
             }
         }
-        fn eval_multi(&self, ans: &[(bool, i32)], sig_rate: i64, rng: &mut ChaChaRng) -> i64 {
+        fn eval_multi(&self, ans: &[(bool, i32)], sig_rate: i32, rng: &mut ChaChaRng) -> i32 {
             let mut sum = 0;
             let mut sumsq = 0;
-            const NORM: i64 = 20;
+            const NORM: i32 = 20;
             for _ in 0..NORM {
                 let score = self.eval(ans, 1, rng);
                 sum += score;
@@ -6055,18 +6055,18 @@ mod solver {
             }
             let ave = sum / NORM;
             let var = max(0, sumsq / NORM - ave * ave);
-            ave + (var as f64).sqrt() as i64
+            ave + (var as f64).sqrt() as i32
         }
-        fn eval(&self, ans: &[(bool, i32)], sig_rate: i64, rng: &mut ChaChaRng) -> i64 {
+        fn eval(&self, ans: &[(bool, i32)], sig_rate: i32, rng: &mut ChaChaRng) -> i32 {
             let mut lower = BTreeMap::new();
-            lower.insert(0i64, 0);
+            lower.insert(0i32, 0);
             let mut xends = vec![];
             use rand::prelude::{thread_rng, Distribution};
             let normal = rand_distr::Normal::<f64>::new(0.0, self.sig as f64).unwrap();
             for (&blk0, &(ri, idx)) in self.blks.iter().zip(ans.iter()) {
                 let mut blk0 = blk0;
-                blk0.w = max(1, blk0.w + sig_rate * normal.sample(rng) as i64);
-                blk0.h = max(1, blk0.h + sig_rate * normal.sample(rng) as i64);
+                blk0.w = max(1, blk0.w + sig_rate * normal.sample(rng) as i32);
+                blk0.h = max(1, blk0.h + sig_rate * normal.sample(rng) as i32);
                 let blk1 = blk0.rot(ri);
                 let x0 = if idx < 0 { 0 } else { xends[idx as usize] };
                 let mut ymax = blk1.h;
@@ -6097,13 +6097,13 @@ mod solver {
             }
             h + w
         }
-        fn build(&self, wmax: i64, rng: &mut ChaChaRng) -> Option<((i64, i64), Vec<(bool, i32)>)> {
+        fn build(&self, wmax: i32, rng: &mut ChaChaRng) -> Option<((i32, i32), Vec<(bool, i32)>)> {
             // x-end, (idx, y_end)
             let mut lower = BTreeMap::new();
-            lower.insert(0i64, Lower::empty());
+            lower.insert(0i32, Lower::empty());
             let mut rec = vec![];
             for (bi, &blk0) in self.blks.iter().enumerate() {
-                const INF: i64 = std::i64::MAX;
+                const INF: i32 = std::i32::MAX;
                 let mut ymax_eval = INF;
                 let mut tgt = (false, (Lower::empty(), (0, 0)));
                 for ri in [false, true] {
@@ -6156,7 +6156,7 @@ mod solver {
             debug_assert_eq!(h + w, self.eval(&rec, 0, rng));
             Some(((h, w), rec))
         }
-        fn build_best(&self, rng: &mut ChaChaRng) -> BinaryHeap<(i64, Vec<(bool, i32)>)> {
+        fn build_best(&self, rng: &mut ChaChaRng) -> BinaryHeap<(i32, Vec<(bool, i32)>)> {
             let mut wmax = 0;
             let mut wmin = 0;
             for &blk in self.blks.iter() {
