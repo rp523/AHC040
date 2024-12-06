@@ -6184,21 +6184,29 @@ mod solver {
             let (_, wmax, _rec) = que.pop().unwrap();
             let mut que = BinaryHeap::new();
             let mut seen = BTreeSet::new();
+            let mut lop = 0;
+            let mut tri = 0;
+            let mut acc = 0;
             while self.t0.elapsed().as_millis() < 2500 {
-                let Some(((_hnow, _wnow), rec)) = self.build_random(wmax, rng) else {
+                lop += 1;
+                let Some(((_hnow, _wnow), rec)) = self.build_random(wmax +  (rng.gen::<u64>() as i64) % (wmax / 20), rng) else {
                     break;
                 };
                 if !seen.insert(rec.clone()) {
                     continue;
                 }
+                tri += 1;
                 let score = self.eval_multi(&rec, 1, rng);
                 if que.len() < self.t {
+                    acc += 1;
                     que.push((score, rec));
                 } else if score < que.peek().unwrap().0 {
                     que.pop();
                     que.push((score, rec));
+                    acc += 1;
                 }
             }
+            //eprintln!("{lop} {tri} {acc}");
             que
         }
         fn build_random(
@@ -6211,7 +6219,7 @@ mod solver {
             lower.insert(0i64, Lower::empty());
             let mut rec = vec![];
             use rand::prelude::{thread_rng, Distribution};
-            let normal = rand_distr::Normal::<f64>::new(0.0, self.sig as f64).unwrap();
+            let normal = rand_distr::Normal::<f64>::new(0.0, self.sig as f64 * 0.5).unwrap();
             for (bi, &blk0_seed) in self.blks.iter().enumerate() {
                 let mut blk0 = blk0_seed;
                 blk0.h += normal.sample(rng) as i64;
