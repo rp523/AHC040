@@ -6183,14 +6183,20 @@ mod solver {
             }
             let (_, wmax, _rec) = que.pop().unwrap();
             let mut que = BinaryHeap::new();
+            let mut seen = BTreeSet::new();
             while self.t0.elapsed().as_millis() < 2500 {
                 let Some(((_hnow, _wnow), rec)) = self.build_random(wmax, rng) else {
                     break;
                 };
+                if !seen.insert(rec.clone()) {
+                    continue;
+                }
                 let score = self.eval_multi(&rec, 1, rng);
-                que.push((score, rec));
-                while que.len() > self.t {
+                if que.len() < self.t {
+                    que.push((score, rec));
+                } else if score < que.peek().unwrap().0 {
                     que.pop();
+                    que.push((score, rec));
                 }
             }
             que
