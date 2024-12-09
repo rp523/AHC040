@@ -6008,23 +6008,158 @@ mod solver {
                 }
             }
         }
-    }
-    #[derive(Clone, Copy, Debug)]
-    struct Lower {
-        idx: i64,
-        y1: i64,
-    }
-    impl Lower {
-        fn empty() -> Self {
-            Self { idx: -1, y1: 0 }
+        fn fluctuate(&self, rand: &mut usize, norms: &[i64]) -> Self {
+            let dh = norms[*rand];
+            *rand = (*rand + 1) % norms.len();
+            let dw = norms[*rand];
+            *rand = (*rand + 1) % norms.len();
+            Self {
+                h: self.h + dh,
+                w: self.w + dw,
+            }
         }
     }
+    mod state {
+        use super::*;
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct State {
+            lower: BTreeMap<i64, i64>,
+            xends: Vec<i64>,
+            wmax: i64,
+        }
+        impl State {
+            fn new(wmax: i64) -> Self {
+                Self {
+                    lower: vec![(0, 0)].into_iter().collect::<BTreeMap<_, _>>(),
+                    xends: vec![],
+                    wmax,
+                }
+            }
+            fn eval(&self, idx: i64, blk1: Block, sig: i64) -> Option<(i64, i64)> {
+                let x0 = if idx < 0 { 0 } else { self.xends[idx as usize] };
+                let to = x0 + blk1.w;
+                if to > self.wmax {
+                    return None;
+                }
+                let ymax = {
+                    let mut ymax = blk1.h;
+                    let mut x = x0;
+                    while let Some((&x1, &lo_y1)) = self.lower.range(x + 1..).next() {
+                        ymax.chmax(lo_y1 + blk1.h);
+                        if to + sig <= x1 {
+                            break;
+                        }
+                        x = x1;
+                    }
+                    ymax
+                };
+                let xmax = max(*self.lower.iter().next_back().unwrap().0, to);
+                Some((ymax, xmax))
+            }
+            fn add(&mut self, idx: i64, blk1: Block, sig: i64) {
+                let x0 = if idx < 0 { 0 } else { self.xends[idx as usize] };
+                let to = x0 + blk1.w;
+                debug_assert!(to <= self.wmax);
+                let ymax = {
+                    let mut ymax = blk1.h;
+                    let mut x = x0;
+                    while let Some((&x1, &lo_y1)) = self.lower.range(x + 1..).next() {
+                        ymax.chmax(lo_y1 + blk1.h);
+                        if to + sig <= x1 {
+                            break;
+                        }
+                        x = x1;
+                    }
+                    ymax
+                };
+                while let Some((&x, _)) = self.lower.range(x0 + 1..).next() {
+                    if x <= to {
+                        let (&prev_x, &prev_y1) = self.lower.range(..x).next_back().unwrap();
+                        if prev_x < x0 {
+                            self.lower.insert(x0, prev_y1);
+                        }
+                        self.lower.remove(&x);
+                    } else {
+                        break;
+                    }
+                }
+                self.lower.insert(to, ymax);
+                self.xends.push(to);
+            }
+        }
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct ParallelStates {
+            states: Vec<State>,
+            rand: usize,
+            rec: Vec<(bool, i64)>,
+            score: i64,
+        }
+        impl ParallelStates {
+            pub fn new(wmax: i64, parallel: usize, rand: usize) -> Self {
+                Self {
+                    states: (0..parallel).map(|_| State::new(wmax)).collect_vec(),
+                    rand,
+                    rec: vec![],
+                    score: 0,
+                }
+            }
+            pub fn eval(
+                &self,
+                ri: bool,
+                idx: i64,
+                blk0: Block,
+                sig: i64,
+                norms: &[i64],
+            ) -> Option<i64> {
+                let blk0 = blk0.rot(ri);
+                let mut sum = 0;
+                let mut sumsq = 0;
+                let mut rand = self.rand;
+                for state in self.states.iter() {
+                    let blk1 = blk0.fluctuate(&mut rand, norms);
+                    let Some((h, _)) = state.eval(idx, blk1, sig) else {
+                        return None;
+                    };
+                    sum += h;
+                    sumsq += h * h;
+                }
+                let ave = sum / self.states.len() as i64;
+                let var = max(1, sumsq / self.states.len() as i64 - ave * ave);
+                let dev = (var as f64).sqrt() as i64;
+                Some(ave + dev)
+            }
+            pub fn add(&mut self, ri: bool, idx: i64, blk0: Block, sig: i64, norms: &[i64]) {
+                self.score = self.eval(ri, idx, blk0, sig, norms).unwrap();
+                let blk0 = blk0.rot(ri);
+                for state in self.states.iter_mut() {
+                    let blk1 = blk0.fluctuate(&mut self.rand, norms);
+                    state.add(idx, blk1, sig);
+                }
+                self.rec.push((ri, idx));
+            }
+            pub fn ans(&self) -> &[(bool, i64)] {
+                &self.rec
+            }
+        }
+        impl PartialOrd for ParallelStates {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                self.score.partial_cmp(&other.score)
+            }
+        }
+        impl Ord for ParallelStates {
+            fn cmp(&self, other: &Self) -> Ordering {
+                self.partial_cmp(&other).unwrap()
+            }
+        }
+    }
+    use state::ParallelStates;
     pub struct Solver {
         t0: Instant,
         t: usize,
         sig: i64,
         blks: Vec<Block>,
         sig_sqrts: Vec<i64>,
+        norms: Vec<i64>,
     }
     impl Solver {
         pub fn new() -> Self {
@@ -6036,86 +6171,20 @@ mod solver {
             let sig_sqrts = (0..=n)
                 .map(|i| ((i as f64).sqrt() * sig) as i64)
                 .collect_vec();
+            let mut rng = ChaChaRng::from_seed([0; 32]);
+            use rand::prelude::{thread_rng, Distribution};
+            let normal = rand_distr::Normal::<f64>::new(0.0, sig as f64).unwrap();
+            let norms = (0..10007)
+                .map(|_| normal.sample(&mut rng) as i64)
+                .collect_vec();
             Self {
                 t0,
                 t,
                 sig: sig as i64,
                 blks,
                 sig_sqrts,
+                norms,
             }
-        }
-        fn eval_multi(&self, ans: &[(bool, i64)], wmax: i64, rng: &mut ChaChaRng) -> Option<i64> {
-            fn eval(
-                ans: &[(bool, i64)],
-                wmax: i64,
-                blks: &[Block],
-                sig: i64,
-                rng: &mut ChaChaRng,
-            ) -> Option<(i64, i64)> {
-                let mut lower = BTreeMap::new();
-                lower.insert(0i64, 0);
-                let mut xends = vec![];
-                use rand::prelude::{thread_rng, Distribution};
-                let normal = rand_distr::Normal::<f64>::new(0.0, sig as f64).unwrap();
-                for (&blk0, &(ri, idx)) in blks.iter().zip(ans.iter()) {
-                    let mut blk0 = blk0;
-                    blk0.w = max(1, blk0.w + normal.sample(rng) as i64);
-                    blk0.h = max(1, blk0.h + normal.sample(rng) as i64);
-                    let blk1 = blk0.rot(ri);
-                    let x0 = if idx < 0 { 0 } else { xends[idx as usize] };
-                    let to = x0 + blk1.w;
-                    if to > wmax {
-                        return None;
-                    }
-                    let ymax = {
-                        let mut ymax = blk1.h;
-                        let mut x = x0;
-                        while let Some((&x1, &lo_y1)) = lower.range(x + 1..).next() {
-                            ymax.chmax(lo_y1 + blk1.h);
-                            if to + sig <= x1 {
-                                break;
-                            }
-                            x = x1;
-                        }
-                        ymax
-                    };
-                    while let Some((&x, _)) = lower.range(x0 + 1..).next() {
-                        if x <= to {
-                            let (&prev_x, &prev_y1) = lower.range(..x).next_back().unwrap();
-                            if prev_x < x0 {
-                                lower.insert(x0, prev_y1);
-                            }
-                            lower.remove(&x);
-                        } else {
-                            break;
-                        }
-                    }
-                    lower.insert(to, ymax);
-                    xends.push(to);
-                }
-                let mut h = 0;
-                let mut w = 0;
-                for (x, lo_y1) in lower {
-                    h.chmax(lo_y1);
-                    w.chmax(x);
-                }
-                Some((h, w))
-            }
-            let mut sum = 0;
-            let mut sumsq = 0;
-            const NORM: i64 = 10;
-            for _ in 0..NORM {
-                let Some((h, w)) = eval(ans, wmax, &self.blks, self.sig, rng) else {
-                    return None;
-                };
-                assert!(w <= wmax);
-                let score = h as i64; //(h + w) as i64;
-                sum += score;
-                sumsq += score * score;
-            }
-            let ave = sum / NORM;
-            let var = max(0, sumsq / NORM - ave * ave);
-            Some((ave + (var as f64).sqrt() as i64) as i64)
         }
         fn answer(ans: &[(bool, i64)]) {
             println!("{}", ans.len());
@@ -6125,55 +6194,41 @@ mod solver {
             }
         }
         pub fn solve(&self) {
-            let mut rng = ChaChaRng::from_seed([0; 32]);
-            const BEAM_WIDTH: usize = 100;
-            let mut states = vec![vec![]];
             let wmax = ((self.blks.iter().map(|blk| blk.h * blk.w).sum::<i64>() as f64).sqrt()
-                * 1.25) as i64;
-            for i in 0..self.blks.len() as i64 {
-                let mut que = BinaryHeap::new();
-                let mut idxs = (-1..i).collect_vec();
-                idxs.shuffle(&mut rng);
-                let beam_width = if i as usize == self.blks.len() - 1 {
-                    self.t
-                } else {
-                    BEAM_WIDTH
-                };
-                while let Some(mut state) = states.pop() {
+                * 1.1) as i64;
+            let mut que = BinaryHeap::new();
+            for i in 0..self.blks.len() {
+                que.push((0, ParallelStates::new(wmax, 20, i)));
+            }
+            for (bi, &blk0) in self.blks.iter().enumerate() {
+                let mut nque = BinaryHeap::new();
+                while let Some((_, state)) = que.pop() {
                     for ri in [false, true] {
-                        for &idx_on in idxs.iter() {
-                            state.push((ri, idx_on));
-                            let Some(score) = self.eval_multi(&state, wmax, &mut rng) else {
-                                state.pop();
+                        for idx in -1..bi as i64 {
+                            let Some(score) = state.eval(ri, idx, blk0, self.sig, &self.norms) else {
                                 continue;
                             };
-                            if que.len() < beam_width {
-                                que.push((score, state.clone()));
-                            } else if score < que.peek().unwrap().0 {
-                                que.pop();
-                                que.push((score, state.clone()));
+                            if nque.len() < min(self.blks.len(), self.t) {
+                                let mut nstate = state.clone();
+                                nstate.add(ri, idx, blk0, self.sig, &self.norms);
+                                nque.push((score, nstate));
+                            } else {
+                                let (pscore, _pstate) = nque.peek().unwrap();
+                                if *pscore > score {
+                                    nque.pop();
+                                    let mut nstate = state.clone();
+                                    nstate.add(ri, idx, blk0, self.sig, &self.norms);
+                                    nque.push((score, nstate));
+                                }
                             }
-                            state.pop();
                         }
                     }
-                    if self.t0.elapsed().as_millis() as usize
-                        > 2500 * (i as usize * (i as usize + 1))
-                            / (self.blks.len() * (self.blks.len() + 1))
-                    {
-                        break;
-                    }
                 }
-                states = que
-                    .into_iter()
-                    .map(|(_score, state)| state)
-                    .rev()
-                    .collect_vec();
+                swap(&mut que, &mut nque);
             }
             let mut rem = self.t;
-            for ans in states.into_iter().rev().take(self.t) {
-                Self::answer(&ans);
-                let _ = read::<usize>();
-                let _ = read::<usize>();
+            for (_, state) in que {
+                Self::answer(state.ans());
                 rem -= 1;
             }
             for _ in 0..rem {
